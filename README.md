@@ -1,92 +1,82 @@
-# my-pdf-tool
+# PaperPilot
 
-Scaffolded with Vuetify CLI.
+PaperPilot is a personal PDF toolbox built with Vue 3, TypeScript, Vite and Vuetify. The goal is to provide a lightweight, local-first browser workflow for common PDF operations without introducing unnecessary complexity or user accounts.
 
-## ❗️ Documentation
+This project follows a modular structure so new utilities can be added progressively while keeping the code base maintainable and easy to extend.
 
-- Primary docs: https://vuetifyjs.com/
-- Getting started guide: https://vuetifyjs.com/en/getting-started/installation/
-- Community support: https://community.vuetifyjs.com/
-- Issue tracker: https://issues.vuetifyjs.com/
+## ✨ Features
+
+- Home page presenting the PDF tools available
+- Reusable PDF upload and drag-and-drop components
+- Local PDF merging in the browser with pdf-lib
+- Clean Vuetify interface adapted to desktop and mobile
+- Project structure prepared for future tools such as split, rotate, reorder and watermark
+- Type-safe service layer separating UI logic from PDF processing
 
 ## 🧱 Stack
 
-- Framework: Vue 3 + Vite
-- UI Library: Vuetify
-- Language: TypeScript
-- Package manager: npm
-
-## 🧭 Start Here
-
-- Main entry: `src/main.ts`
-- Main app component: `src/App.vue`
-- Main styles: `src/styles/`
-- Plugin setup: `src/plugins/`
-
-## 📁 Project Structure
-
-- `src/main.ts` — application entry point
-- `src/App.vue` — root component
-- `src/components/` — reusable Vue components
-- `src/plugins/` — plugin registration and setup
-- `src/styles/` — global styles and theme settings
-- `public/` — static public files
-
-## ✨ Enabled Features
-
-- ESLint
-- Pinia
-- Vue I18n
-- Vuetify MCP
+- Vue 3
+- TypeScript
+- Vite
 - Vue Router
+- Pinia
+- Vuetify
+- Vitest
+- ESLint
+- Prettier
+- pdf-lib
 
-## 💿 Install
+## 🔒 Local processing
 
-Use your selected package manager (npm) to install dependencies:
+Sensitive PDF files remain in the browser as much as possible. The current merge tool performs processing locally in the client rather than sending documents to a remote server. This keeps the workflow simple and privacy-friendly while making it easier to add backend-based features later if needed.
+
+## 🚀 Installation
 
 ```bash
 npm install
 ```
 
-## 🚀 Quick Start
+## 🧪 Development
 
 ```bash
-npm install
 npm run dev
 ```
 
-## 🏗️ Build
+The app is served by Vite on the default port configured in the project.
+
+## 🏗️ Production build
 
 ```bash
 npm run build
 ```
 
-## 🧪 Available Scripts
-
-- `npm run dev`
-- `npm run build`
-- `npm run preview`
-- `npm run build-only`
-- `npm run type-check`
-- `npm run lint`
-- `npm run lint:fix`
-
-## 🤖 Vuetify MCP Server
-
-This project is configured with the Vuetify Model Context Protocol (MCP) server.
-To install and configure the MCP server for your favorite IDE (Cursor, Trae, Windsurf, VS Code, Claude Desktop, etc.) run:
+## ✅ Tests
 
 ```bash
-npx -y @vuetify/mcp-cli
+npm run test
 ```
 
-This will open an interactive setup wizard to help you connect your AI assistant to the Vuetify ecosystem.
+## 📁 General project structure
 
-## 💪 Support Vuetify Development
+```text
+src/
+  components/
+    common/
+    layout/
+    pdf/
+  data/
+  pages/
+    tools/
+  plugins/
+  router/
+  services/
+    pdf/
+  styles/
+  types/
+```
 
-This project uses Vuetify - an MIT licensed Open Source project. We are glad to welcome contributors and any support for ongoing development:
+## 📜 License
 
-- Contribute to Vuetify and ecosystem projects: https://github.com/vuetifyjs
-- Request enterprise support: https://support.vuetifyjs.com/
-- Sponsor on GitHub: https://github.com/sponsors/vuetifyjs
-- Support on Open Collective: https://opencollective.com/vuetify
+This project is licensed under the GNU GPL v3.0.
+
+See the [LICENSE](LICENSE) file for the complete text.
