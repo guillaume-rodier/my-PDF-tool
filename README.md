@@ -9,6 +9,8 @@ This project follows a modular structure so new utilities can be added progressi
 - Home page presenting the PDF tools available
 - Reusable PDF upload and drag-and-drop components
 - Local PDF merging in the browser with pdf-lib
+- Document editor to combine PDF pages and JPG/JPEG/PNG/WebP images
+- Page rotation, image placement, proportional resizing, image rotation and page reordering
 - Clean Vuetify interface adapted to desktop and mobile
 - Project structure prepared for future tools such as split, rotate, reorder and watermark
 - Type-safe service layer separating UI logic from PDF processing
@@ -25,10 +27,13 @@ This project follows a modular structure so new utilities can be added progressi
 - ESLint
 - Prettier
 - pdf-lib
+- PDF.js
 
 ## 🔒 Local processing
 
-Sensitive PDF files remain in the browser as much as possible. The current merge tool performs processing locally in the client rather than sending documents to a remote server. This keeps the workflow simple and privacy-friendly while making it easier to add backend-based features later if needed.
+Sensitive PDF files remain in the browser. The merge tool and document editor process files locally rather than sending documents to a remote server.
+
+The document editor exports pages as images inside the resulting PDF so original PDF pages, rotations and added image compositions render consistently. As a result, text in exported pages is not selectable or searchable. Rendering is capped to control browser memory use; this editor is intended for normal documents, not very large print-production files.
 
 ## 🚀 Installation
 

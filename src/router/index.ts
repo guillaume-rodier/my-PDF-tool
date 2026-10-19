@@ -12,6 +12,11 @@ const router = createRouter({
       component: Index,
     },
     {
+      path: '/tools/editor',
+      name: 'document-editor',
+      component: () => import('@/pages/tools/DocumentEditorPage.vue'),
+    },
+    {
       path: '/tools/merge-pdf',
       name: 'merge-pdf',
       component: MergePdfPage,

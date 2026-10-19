@@ -2,6 +2,14 @@ import type { PdfTool } from '@/types/pdf'
 
 export const pdfTools: PdfTool[] = [
   {
+    id: 'document-editor',
+    name: 'Composer un PDF',
+    description: 'Réunissez PDF et images, ajustez la composition puis exportez un document.',
+    icon: 'mdi-file-edit-outline',
+    route: '/tools/editor',
+    available: true,
+  },
+  {
     id: 'merge-pdf',
     name: 'Fusionner des PDF',
     description: 'Combine plusieurs fichiers PDF dans un ordre précis.',
