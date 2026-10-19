@@ -3,6 +3,7 @@
 
   import { computed, ref, watch } from 'vue'
   import { getOrientedPageSize, renderPdfPage } from '@/services/pdf/documentEditor'
+  import { alignImageToPage } from '@/utils/imageAlignment'
 
   const props = defineProps<{
     page: EditorPage
@@ -18,6 +19,10 @@
   const pdfPreview = ref('')
   const renderError = ref('')
   const artworkRef = ref<HTMLElement | null>(null)
+  const alignmentGuides = ref<{ vertical: number | null, horizontal: number | null }>({
+    vertical: null,
+    horizontal: null,
+  })
   let renderRequest = 0
 
   const pageSize = computed(() => getOrientedPageSize(props.page))
@@ -68,6 +73,18 @@
     }
   }
 
+  function getSnapThreshold () {
+    const artwork = artworkRef.value
+
+    if (!artwork) {
+      return 0
+    }
+
+    const bounds = artwork.getBoundingClientRect()
+
+    return (10 * pageSize.value.width) / bounds.width
+  }
+
   function imageLocalPosition (
     point: { x: number, y: number },
     image: Pick<EditorImage, 'x' | 'y' | 'width' | 'height' | 'rotation'>,
@@ -110,22 +127,23 @@
         return
       }
 
-      const visibleHandle = 20
-      const x = Math.min(
-        Math.max(initialX + currentPointer.x - startPointer.x, -image.width + visibleHandle),
-        props.page.width - visibleHandle,
-      )
-      const y = Math.min(
-        Math.max(initialY + currentPointer.y - startPointer.y, -image.height + visibleHandle),
-        props.page.height - visibleHandle,
-      )
+      const alignment = alignImageToPage({
+        ...image,
+        x: initialX + currentPointer.x - startPointer.x,
+        y: initialY + currentPointer.y - startPointer.y,
+      }, props.page.width, props.page.height, getSnapThreshold())
 
-      emit('update-image', { imageId: image.id, changes: { x, y } })
+      alignmentGuides.value = {
+        vertical: alignment.verticalGuide,
+        horizontal: alignment.horizontalGuide,
+      }
+      emit('update-image', { imageId: image.id, changes: alignment.image })
     }
 
     function stop () {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', stop)
+      alignmentGuides.value = { vertical: null, horizontal: null }
     }
 
     window.addEventListener('pointermove', move)
@@ -166,21 +184,25 @@
       const ratioFactor = 1 / image.aspectRatio
       const widthDelta = (deltaX + deltaY * ratioFactor) / (1 + ratioFactor ** 2)
       const width = Math.max(1, initialWidth + widthDelta)
+      const alignment = alignImageToPage({
+        ...image,
+        x: initialImage.x,
+        y: initialImage.y,
+        width,
+        height: width / image.aspectRatio,
+      }, props.page.width, props.page.height, getSnapThreshold())
 
-      emit('update-image', {
-        imageId: image.id,
-        changes: {
-          width,
-          height: width / image.aspectRatio,
-          x: initialImage.x,
-          y: initialImage.y,
-        },
-      })
+      alignmentGuides.value = {
+        vertical: alignment.verticalGuide,
+        horizontal: alignment.horizontalGuide,
+      }
+      emit('update-image', { imageId: image.id, changes: alignment.image })
     }
 
     function stop () {
       window.removeEventListener('pointermove', resize)
       window.removeEventListener('pointerup', stop)
+      alignmentGuides.value = { vertical: null, horizontal: null }
     }
 
     window.addEventListener('pointermove', resize)
@@ -220,6 +242,18 @@
       <img v-if="pdfPreview" alt="Aperçu de la page PDF" class="page-background" :src="pdfPreview">
       <div v-else-if="renderError" class="page-placeholder">{{ renderError }}</div>
       <div v-else class="page-placeholder">{{ page.sourceType === 'pdf' ? 'Chargement de la page…' : 'Page blanche' }}</div>
+
+      <div
+        v-if="alignmentGuides.vertical !== null"
+        class="alignment-guide alignment-guide--vertical"
+        :style="{ left: `${(alignmentGuides.vertical / page.width) * 100}%` }"
+      />
+
+      <div
+        v-if="alignmentGuides.horizontal !== null"
+        class="alignment-guide alignment-guide--horizontal"
+        :style="{ top: `${(alignmentGuides.horizontal / page.height) * 100}%` }"
+      />
 
       <div
         v-for="image in page.images"
@@ -275,6 +309,26 @@
     inset: 0;
     width: 100%;
     height: 100%;
+  }
+
+  .alignment-guide {
+    position: absolute;
+    z-index: 2;
+    border-color: #e5484d;
+    border-style: dashed;
+    pointer-events: none;
+  }
+
+  .alignment-guide--vertical {
+    top: 0;
+    bottom: 0;
+    border-left-width: 1px;
+  }
+
+  .alignment-guide--horizontal {
+    right: 0;
+    left: 0;
+    border-top-width: 1px;
   }
 
   .page-background {

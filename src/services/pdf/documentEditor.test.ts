@@ -3,6 +3,7 @@ import * as appPdfjs from 'pdfjs-dist'
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { describe, expect, it } from 'vitest'
 
+import { alignImageToPage, centerImageOnPage, constrainImageToPage, getImageBounds } from '@/utils/imageAlignment'
 import { exportEditorPages, getOrientedPageSize, isSupportedDocument, validateDocumentFiles } from './documentEditor'
 
 const nodeWorkerUrl = new URL('../../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).href
@@ -99,5 +100,50 @@ describe('exportEditorPages', () => {
     } finally {
       await resultTask.destroy()
     }
+  })
+})
+
+describe('image alignment', () => {
+  const pageWidth = 600
+  const pageHeight = 800
+  const image = {
+    id: 'image-1',
+    name: 'image.png',
+    dataUrl: '',
+    x: 24,
+    y: 30,
+    width: 200,
+    height: 100,
+    rotation: 0,
+    aspectRatio: 2,
+  }
+
+  it('snaps image edges to page edges and its center to page center', () => {
+    const edgeAligned = alignImageToPage({ ...image, x: 5 }, pageWidth, pageHeight, 8)
+    const centerAligned = alignImageToPage({ ...image, x: 195 }, pageWidth, pageHeight, 8)
+
+    expect(edgeAligned.image.x).toBe(0)
+    expect(edgeAligned.verticalGuide).toBe(0)
+    expect(centerAligned.image.x + centerAligned.image.width / 2).toBe(pageWidth / 2)
+    expect(centerAligned.verticalGuide).toBe(pageWidth / 2)
+  })
+
+  it('keeps the rotated image bounds inside the page', () => {
+    const oversizedRotatedImage = { ...image, width: 900, height: 450, rotation: 90 }
+    const bounded = constrainImageToPage(oversizedRotatedImage, pageWidth, pageHeight)
+    const bounds = getImageBounds(bounded)
+
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.top).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(pageWidth)
+    expect(bounds.bottom).toBeLessThanOrEqual(pageHeight)
+  })
+
+  it('centers an image horizontally and vertically', () => {
+    const horizontallyCentered = centerImageOnPage(image, pageWidth, pageHeight, 'horizontal')
+    const verticallyCentered = centerImageOnPage(image, pageWidth, pageHeight, 'vertical')
+
+    expect(horizontallyCentered.x + horizontallyCentered.width / 2).toBe(pageWidth / 2)
+    expect(verticallyCentered.y + verticallyCentered.height / 2).toBe(pageHeight / 2)
   })
 })

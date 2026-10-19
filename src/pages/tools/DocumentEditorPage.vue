@@ -7,6 +7,7 @@
   import PdfDropzone from '@/components/pdf/PdfDropzone.vue'
   import PdfFileList from '@/components/pdf/PdfFileList.vue'
   import { createEditorPages, exportEditorPages, readImageForPage } from '@/services/pdf/documentEditor'
+  import { centerImageOnPage, constrainImageToPage } from '@/utils/imageAlignment'
 
   const selectedFiles = ref<File[]>([])
   const pages = ref<EditorPage[]>([])
@@ -143,7 +144,7 @@
       return
     }
 
-    Object.assign(image, payload.changes)
+    Object.assign(image, constrainImageToPage({ ...image, ...payload.changes }, selectedPage.value!.width, selectedPage.value!.height))
     clearDownload()
   }
 
@@ -161,8 +162,10 @@
       return
     }
 
-    selectedImage.value.rotation = (selectedImage.value.rotation + degrees + 360) % 360
-    clearDownload()
+    updateImage({
+      imageId: selectedImage.value.id,
+      changes: { rotation: (selectedImage.value.rotation + degrees + 360) % 360 },
+    })
   }
 
   function resizeSelectedImage (value: string | number | number[]) {
@@ -180,9 +183,17 @@
     const width = (selectedPage.value.width * widthPercent) / 100
     const height = width / image.aspectRatio
 
-    image.width = width
-    image.height = height
-    clearDownload()
+    updateImage({ imageId: image.id, changes: { width, height } })
+  }
+
+  function centerSelectedImage (axis: 'horizontal' | 'vertical') {
+    if (!selectedImage.value || !selectedPage.value) {
+      return
+    }
+
+    const centered = centerImageOnPage(selectedImage.value, selectedPage.value.width, selectedPage.value.height, axis)
+
+    updateImage({ imageId: selectedImage.value.id, changes: centered })
   }
 
   function deleteSelectedImage () {
@@ -528,6 +539,28 @@
                       </v-btn>
                     </div>
 
+                    <div class="property-label mt-6">Centrage sur la page</div>
+
+                    <div class="image-alignment-actions">
+                      <v-btn
+                        block
+                        prepend-icon="mdi-align-horizontal-center"
+                        variant="outlined"
+                        @click="centerSelectedImage('horizontal')"
+                      >
+                        Horizontal
+                      </v-btn>
+
+                      <v-btn
+                        block
+                        prepend-icon="mdi-align-vertical-center"
+                        variant="outlined"
+                        @click="centerSelectedImage('vertical')"
+                      >
+                        Vertical
+                      </v-btn>
+                    </div>
+
                     <v-btn
                       block
                       class="mt-6"
@@ -584,6 +617,12 @@
   }
 
   .image-rotation-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .image-alignment-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
