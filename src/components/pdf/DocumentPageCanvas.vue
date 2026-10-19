@@ -46,8 +46,8 @@
     }
 
     const bounds = artwork.getBoundingClientRect()
-    const horizontal = Math.min(Math.max((event.clientX - bounds.left) / bounds.width, 0), 1)
-    const vertical = Math.min(Math.max((event.clientY - bounds.top) / bounds.height, 0), 1)
+    const horizontal = (event.clientX - bounds.left) / bounds.width
+    const vertical = (event.clientY - bounds.top) / bounds.height
     const rotation = ((props.page.rotation % 360) + 360) % 360
 
     if (rotation === 90) {
@@ -65,6 +65,22 @@
     return {
       x: horizontal * props.page.width,
       y: vertical * props.page.height,
+    }
+  }
+
+  function imageLocalPosition (
+    point: { x: number, y: number },
+    image: Pick<EditorImage, 'x' | 'y' | 'width' | 'height' | 'rotation'>,
+  ) {
+    const centerX = image.x + image.width / 2
+    const centerY = image.y + image.height / 2
+    const radians = (-image.rotation * Math.PI) / 180
+    const offsetX = point.x - centerX
+    const offsetY = point.y - centerY
+
+    return {
+      x: centerX + offsetX * Math.cos(radians) - offsetY * Math.sin(radians),
+      y: centerY + offsetX * Math.sin(radians) + offsetY * Math.cos(radians),
     }
   }
 
@@ -94,8 +110,15 @@
         return
       }
 
-      const x = Math.min(Math.max(initialX + currentPointer.x - startPointer.x, 0), props.page.width - image.width)
-      const y = Math.min(Math.max(initialY + currentPointer.y - startPointer.y, 0), props.page.height - image.height)
+      const visibleHandle = 20
+      const x = Math.min(
+        Math.max(initialX + currentPointer.x - startPointer.x, -image.width + visibleHandle),
+        props.page.width - visibleHandle,
+      )
+      const y = Math.min(
+        Math.max(initialY + currentPointer.y - startPointer.y, -image.height + visibleHandle),
+        props.page.height - visibleHandle,
+      )
 
       emit('update-image', { imageId: image.id, changes: { x, y } })
     }
@@ -120,7 +143,14 @@
       return
     }
 
-    const startPointer = initialPointer
+    const startPointer = imageLocalPosition(initialPointer, image)
+    const initialImage = {
+      x: image.x,
+      y: image.y,
+      width: image.width,
+      height: image.height,
+      rotation: image.rotation,
+    }
     const initialWidth = image.width
 
     function resize (pointerEvent: PointerEvent) {
@@ -130,21 +160,20 @@
         return
       }
 
-      const widthFromX = initialWidth + currentPointer.x - startPointer.x
-      const heightFromY = (image.height + currentPointer.y - startPointer.y) * image.aspectRatio
-      const width = Math.min(
-        Math.max(Math.max(widthFromX, heightFromY), 32),
-        props.page.width * 0.95,
-        props.page.height * 0.95 * image.aspectRatio,
-      )
+      const currentLocal = imageLocalPosition(currentPointer, initialImage)
+      const deltaX = currentLocal.x - startPointer.x
+      const deltaY = currentLocal.y - startPointer.y
+      const ratioFactor = 1 / image.aspectRatio
+      const widthDelta = (deltaX + deltaY * ratioFactor) / (1 + ratioFactor ** 2)
+      const width = Math.max(1, initialWidth + widthDelta)
 
       emit('update-image', {
         imageId: image.id,
         changes: {
           width,
           height: width / image.aspectRatio,
-          x: Math.min(image.x, props.page.width - width),
-          y: Math.min(image.y, props.page.height - width / image.aspectRatio),
+          x: initialImage.x,
+          y: initialImage.y,
         },
       })
     }

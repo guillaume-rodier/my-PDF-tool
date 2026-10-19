@@ -19,9 +19,9 @@
               Gérer vos documents directement dans le navigateur, sans compte ni complication.
             </p>
 
-            <div class="d-flex flex-wrap gap-3">
+            <div class="d-flex flex-wrap ga-3">
               <v-btn color="primary" size="large" to="/tools/merge-pdf">Lancer la fusion</v-btn>
-              <v-btn size="large" to="/" variant="outlined">Découvrir les outils</v-btn>
+              <v-btn href="#tools" size="large" variant="outlined">Découvrir les outils</v-btn>
             </div>
           </v-col>
 
@@ -53,7 +53,7 @@
           </v-col>
         </v-row>
 
-        <div class="mb-5">
+        <div id="tools" class="mb-5">
           <div class="text-overline text-primary font-weight-bold">Outils disponibles</div>
           <h2 class="text-h4 font-weight-bold mb-1">Catalogue des outils</h2>
         </div>

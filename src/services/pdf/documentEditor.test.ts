@@ -1,6 +1,14 @@
+import { PDFDocument, StandardFonts } from 'pdf-lib'
+import * as appPdfjs from 'pdfjs-dist'
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { describe, expect, it } from 'vitest'
 
-import { getOrientedPageSize, isSupportedDocument, validateDocumentFiles } from './documentEditor'
+import { exportEditorPages, getOrientedPageSize, isSupportedDocument, validateDocumentFiles } from './documentEditor'
+
+const nodeWorkerUrl = new URL('../../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).href
+
+appPdfjs.GlobalWorkerOptions.workerSrc = nodeWorkerUrl
+pdfjs.GlobalWorkerOptions.workerSrc = nodeWorkerUrl
 
 describe('document file validation', () => {
   it.each([
@@ -33,5 +41,63 @@ describe('getOrientedPageSize', () => {
 
   it.each([90, 270, -90])('swaps the dimensions after a quarter turn (%i degrees)', rotation => {
     expect(getOrientedPageSize({ ...page, rotation })).toEqual({ width: 800, height: 600 })
+  })
+})
+
+describe('exportEditorPages', () => {
+  it('keeps PDF text searchable when exporting a PDF page', async () => {
+    const source = await PDFDocument.create()
+    const sourcePage = source.addPage([600, 800])
+    const font = await source.embedFont(StandardFonts.Helvetica)
+
+    sourcePage.drawText('Text remains searchable', { x: 40, y: 740, font, size: 16 })
+
+    const imageDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/jZsAAAAASUVORK5CYII='
+
+    const sourceBytes = await source.save()
+    const sourceBuffer = new ArrayBuffer(sourceBytes.byteLength)
+
+    new Uint8Array(sourceBuffer).set(sourceBytes)
+
+    const sourceFile = new File([sourceBuffer], 'source.pdf', { type: 'application/pdf' })
+    const result = await exportEditorPages([{
+      id: 'source-page-1',
+      sourceFile,
+      sourceName: sourceFile.name,
+      sourceType: 'pdf',
+      pdfPageNumber: 1,
+      width: 600,
+      height: 800,
+      rotation: 90,
+      images: [{
+        id: 'overlay-1',
+        name: 'logo.png',
+        dataUrl: imageDataUrl,
+        x: 40,
+        y: 60,
+        width: 120,
+        height: 80,
+        rotation: 0,
+        aspectRatio: 1.5,
+      }],
+    }])
+    const resultTask = pdfjs.getDocument({ data: await result.arrayBuffer() })
+
+    try {
+      const resultPdf = await resultTask.promise
+      const resultPage = await resultPdf.getPage(1)
+      const textContent = await resultPage.getTextContent()
+      const operatorList = await resultPage.getOperatorList()
+      const exportedText = textContent.items
+        .filter(item => 'str' in item)
+        .map(item => 'str' in item ? item.str : '')
+        .join(' ')
+
+      expect(exportedText).toContain('Text remains searchable')
+      expect(resultPage.rotate).toBe(90)
+      expect(operatorList.fnArray).toContain(pdfjs.OPS.paintImageXObject)
+    } finally {
+      await resultTask.destroy()
+    }
   })
 })

@@ -1,5 +1,5 @@
 import type { EditorImage, EditorPage } from '@/types/documentEditor'
-import { PDFDocument } from 'pdf-lib'
+import { degrees, PDFDocument } from 'pdf-lib'
 import * as pdfjs from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -10,7 +10,6 @@ const A4_HEIGHT = 841.89
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const IMAGE_EXTENSIONS = /\.(?:jpe?g|png|webp)$/i
 const PDF_EXTENSION = /\.pdf$/i
-const PAGE_RENDER_SCALE = 2
 const MAX_RENDER_PIXELS = 2600
 
 export function isSupportedDocument (file: File): boolean {
@@ -158,11 +157,6 @@ export async function renderPdfPage (page: EditorPage, scale = 1): Promise<strin
   }
 }
 
-interface PdfRenderCache {
-  documents: Map<File, Promise<pdfjs.PDFDocumentProxy>>
-  loadingTasks: Map<File, ReturnType<typeof pdfjs.getDocument>>
-}
-
 async function renderPdfPageFromDocument (page: EditorPage, pdf: pdfjs.PDFDocumentProxy, scale: number): Promise<string> {
   const pdfPage = await pdf.getPage(page.pdfPageNumber!)
   const renderScale = Math.min(scale, MAX_RENDER_PIXELS / Math.max(page.width, page.height))
@@ -181,23 +175,6 @@ async function renderPdfPageFromDocument (page: EditorPage, pdf: pdfjs.PDFDocume
   return canvas.toDataURL('image/png')
 }
 
-async function getExportPdfDocument (file: File, cache: PdfRenderCache): Promise<pdfjs.PDFDocumentProxy> {
-  let documentPromise = cache.documents.get(file)
-
-  if (!documentPromise) {
-    documentPromise = file.arrayBuffer().then(bytes => {
-      const loadingTask = pdfjs.getDocument({ data: bytes })
-
-      cache.loadingTasks.set(file, loadingTask)
-
-      return loadingTask.promise
-    })
-    cache.documents.set(file, documentPromise)
-  }
-
-  return await documentPromise
-}
-
 function loadImage (dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image()
@@ -208,94 +185,161 @@ function loadImage (dataUrl: string): Promise<HTMLImageElement> {
   })
 }
 
-async function canvasToPngBytes (canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(result => {
-      if (result) {
-        resolve(result)
-      } else {
-        reject(new Error('Le navigateur ne peut pas encoder cette page en image.'))
-      }
-    }, 'image/png')
-  })
+async function embedEditorImage (pdfDocument: PDFDocument, image: EditorImage) {
+  const imageBytes = new Uint8Array(await (await fetch(image.dataUrl)).arrayBuffer())
 
-  return new Uint8Array(await blob.arrayBuffer())
-}
+  if (image.dataUrl.startsWith('data:image/jpeg')) {
+    return await pdfDocument.embedJpg(imageBytes)
+  }
 
-async function renderPageToPng (page: EditorPage, cache: PdfRenderCache): Promise<Uint8Array> {
-  const scale = Math.min(PAGE_RENDER_SCALE, MAX_RENDER_PIXELS / Math.max(page.width, page.height))
+  if (image.dataUrl.startsWith('data:image/png')) {
+    return await pdfDocument.embedPng(imageBytes)
+  }
+
+  const imageElement = await loadImage(image.dataUrl)
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d')
 
   if (!context) {
-    throw new Error('Le navigateur ne peut pas préparer l’export PDF.')
+    throw new Error('Le navigateur ne peut pas convertir cette image pour le PDF.')
   }
 
-  canvas.width = Math.ceil(page.width * scale)
-  canvas.height = Math.ceil(page.height * scale)
-  context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
+  canvas.width = imageElement.naturalWidth
+  canvas.height = imageElement.naturalHeight
+  context.drawImage(imageElement, 0, 0)
 
-  if (page.sourceType === 'pdf') {
-    const pdf = await getExportPdfDocument(page.sourceFile, cache)
-    const backgroundUrl = await renderPdfPageFromDocument(page, pdf, scale)
-    const background = await loadImage(backgroundUrl)
+  const pngBytes = await (await fetch(canvas.toDataURL('image/png'))).arrayBuffer()
 
-    context.drawImage(background, 0, 0, canvas.width, canvas.height)
+  return await pdfDocument.embedPng(new Uint8Array(pngBytes))
+}
+
+function transformViewportPointToPdf (viewport: pdfjs.PageViewport, x: number, y: number) {
+  const [a, b, c, d, e, f] = viewport.transform
+  const determinant = a * d - b * c
+  const translatedX = x - e
+  const translatedY = y - f
+
+  return {
+    x: (d * translatedX - c * translatedY) / determinant,
+    y: (-b * translatedX + a * translatedY) / determinant,
+  }
+}
+
+function transformViewportVectorToPdf (viewport: pdfjs.PageViewport, x: number, y: number) {
+  const [a, b, c, d] = viewport.transform
+  const determinant = a * d - b * c
+
+  return {
+    x: (d * x - c * y) / determinant,
+    y: (-b * x + a * y) / determinant,
+  }
+}
+
+function getPdfImagePlacement (image: EditorImage, viewport: pdfjs.PageViewport) {
+  const radians = (image.rotation * Math.PI) / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const centerX = image.x + image.width / 2
+  const centerY = image.y + image.height / 2
+  const bottomLeft = transformViewportPointToPdf(
+    viewport,
+    centerX - (cosine * image.width) / 2 - (sine * image.height) / 2,
+    centerY - (sine * image.width) / 2 + (cosine * image.height) / 2,
+  )
+  const horizontalVector = transformViewportVectorToPdf(viewport, cosine, sine)
+
+  return {
+    x: bottomLeft.x,
+    y: bottomLeft.y,
+    width: image.width,
+    height: image.height,
+    rotation: (Math.atan2(horizontalVector.y, horizontalVector.x) * 180) / Math.PI,
+  }
+}
+
+function getImagePagePlacement (image: EditorImage, pageHeight: number) {
+  const rotation = (-image.rotation * Math.PI) / 180
+  const cosine = Math.cos(rotation)
+  const sine = Math.sin(rotation)
+  const centerX = image.x + image.width / 2
+  const centerY = pageHeight - image.y - image.height / 2
+
+  return {
+    x: centerX - (cosine * image.width) / 2 + (sine * image.height) / 2,
+    y: centerY - (sine * image.width) / 2 - (cosine * image.height) / 2,
+    rotation: (rotation * 180) / Math.PI,
+  }
+}
+
+interface ExportPdfCache {
+  pdfDocuments: Map<File, Promise<PDFDocument>>
+  pdfJsDocuments: Map<File, Promise<pdfjs.PDFDocumentProxy>>
+  pdfJsLoadingTasks: Map<File, ReturnType<typeof pdfjs.getDocument>>
+}
+
+function getSourcePdf (file: File, cache: ExportPdfCache): Promise<PDFDocument> {
+  let documentPromise = cache.pdfDocuments.get(file)
+
+  if (!documentPromise) {
+    documentPromise = file.arrayBuffer().then(bytes => PDFDocument.load(bytes))
+    cache.pdfDocuments.set(file, documentPromise)
   }
 
-  for (const imageItem of page.images) {
-    const image = await loadImage(imageItem.dataUrl)
-    const x = imageItem.x * scale
-    const y = imageItem.y * scale
-    const width = imageItem.width * scale
-    const height = imageItem.height * scale
+  return documentPromise
+}
 
-    context.save()
-    context.translate(x + width / 2, y + height / 2)
-    context.rotate((imageItem.rotation * Math.PI) / 180)
-    context.drawImage(image, -width / 2, -height / 2, width, height)
-    context.restore()
+function getPdfJsSource (file: File, cache: ExportPdfCache): Promise<pdfjs.PDFDocumentProxy> {
+  let documentPromise = cache.pdfJsDocuments.get(file)
+
+  if (!documentPromise) {
+    documentPromise = file.arrayBuffer().then(bytes => {
+      const loadingTask = pdfjs.getDocument({ data: bytes })
+
+      cache.pdfJsLoadingTasks.set(file, loadingTask)
+
+      return loadingTask.promise
+    })
+    cache.pdfJsDocuments.set(file, documentPromise)
   }
 
-  const outputCanvas = document.createElement('canvas')
-  const rotation = ((page.rotation % 360) + 360) % 360
-  const quarterTurn = rotation === 90 || rotation === 270
+  return documentPromise
+}
 
-  outputCanvas.width = quarterTurn ? canvas.height : canvas.width
-  outputCanvas.height = quarterTurn ? canvas.width : canvas.height
+function normalizeRotation (rotation: number): number {
+  return ((rotation % 360) + 360) % 360
+}
 
-  const outputContext = outputCanvas.getContext('2d')
+async function addEditorImage (
+  output: PDFDocument,
+  outputPage: ReturnType<PDFDocument['addPage']>,
+  image: EditorImage,
+  viewport?: pdfjs.PageViewport,
+) {
+  const embeddedImage = await embedEditorImage(output, image)
 
-  if (!outputContext) {
-    throw new Error('Le navigateur ne peut pas préparer l’export PDF.')
+  if (viewport) {
+    const placement = getPdfImagePlacement(image, viewport)
+
+    outputPage.drawImage(embeddedImage, {
+      x: placement.x,
+      y: placement.y,
+      width: placement.width,
+      height: placement.height,
+      rotate: degrees(placement.rotation),
+    })
+
+    return
   }
 
-  switch (rotation) {
-    case 90: {
-      outputContext.translate(outputCanvas.width, 0)
-      outputContext.rotate(Math.PI / 2)
+  const placement = getImagePagePlacement(image, outputPage.getHeight())
 
-      break
-    }
-    case 180: {
-      outputContext.translate(outputCanvas.width, outputCanvas.height)
-      outputContext.rotate(Math.PI)
-
-      break
-    }
-    case 270: {
-      outputContext.translate(0, outputCanvas.height)
-      outputContext.rotate(-Math.PI / 2)
-
-      break
-    }
-  // No default
-  }
-
-  outputContext.drawImage(canvas, 0, 0)
-
-  return await canvasToPngBytes(outputCanvas)
+  outputPage.drawImage(embeddedImage, {
+    x: placement.x,
+    y: placement.y,
+    width: image.width,
+    height: image.height,
+    rotate: degrees(placement.rotation),
+  })
 }
 
 export async function exportEditorPages (pages: EditorPage[]): Promise<Blob> {
@@ -304,21 +348,45 @@ export async function exportEditorPages (pages: EditorPage[]): Promise<Blob> {
   }
 
   const output = await PDFDocument.create()
-  const cache: PdfRenderCache = { documents: new Map(), loadingTasks: new Map() }
+  const cache: ExportPdfCache = {
+    pdfDocuments: new Map(),
+    pdfJsDocuments: new Map(),
+    pdfJsLoadingTasks: new Map(),
+  }
 
   try {
     for (const page of pages) {
-      const orientedSize = getOrientedPageSize(page)
-      const pngBytes = await renderPageToPng(page, cache)
-      const embeddedImage = await output.embedPng(pngBytes)
-      const outputPage = output.addPage([orientedSize.width, orientedSize.height])
+      let outputPage: ReturnType<PDFDocument['addPage']>
+      let viewport: pdfjs.PageViewport | undefined
 
-      outputPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width: orientedSize.width,
-        height: orientedSize.height,
-      })
+      if (page.sourceType === 'pdf') {
+        if (!page.pdfPageNumber) {
+          throw new Error(`Impossible de retrouver la page PDF « ${page.sourceName} ».`)
+        }
+
+        const source = await getSourcePdf(page.sourceFile, cache)
+        const sourcePageIndex = page.pdfPageNumber - 1
+        const sourcePage = source.getPage(sourcePageIndex)
+        const [copiedPage] = await output.copyPages(source, [sourcePageIndex])
+        const rotation = normalizeRotation(sourcePage.getRotation().angle + page.rotation)
+
+        copiedPage.setRotation(degrees(rotation))
+        outputPage = output.addPage(copiedPage)
+
+        if (page.images.length > 0) {
+          const pdfJsSource = await getPdfJsSource(page.sourceFile, cache)
+          const pdfJsPage = await pdfJsSource.getPage(page.pdfPageNumber)
+
+          viewport = pdfJsPage.getViewport({ scale: 1 })
+        }
+      } else {
+        outputPage = output.addPage([page.width, page.height])
+        outputPage.setRotation(degrees(page.rotation))
+      }
+
+      for (const image of page.images) {
+        await addEditorImage(output, outputPage, image, viewport)
+      }
     }
 
     const pdfBytes = await output.save()
@@ -327,7 +395,7 @@ export async function exportEditorPages (pages: EditorPage[]): Promise<Blob> {
 
     return new Blob([buffer], { type: 'application/pdf' })
   } finally {
-    await Promise.allSettled([...cache.loadingTasks.values()].map(task => task.destroy()))
+    await Promise.allSettled([...cache.pdfJsLoadingTasks.values()].map(task => task.destroy()))
   }
 }
 

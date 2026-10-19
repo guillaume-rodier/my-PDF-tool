@@ -33,7 +33,7 @@ This project follows a modular structure so new utilities can be added progressi
 
 Sensitive PDF files remain in the browser. The merge tool and document editor process files locally rather than sending documents to a remote server.
 
-The document editor exports pages as images inside the resulting PDF so original PDF pages, rotations and added image compositions render consistently. As a result, text in exported pages is not selectable or searchable. Rendering is capped to control browser memory use; this editor is intended for normal documents, not very large print-production files.
+The document editor copies imported PDF pages into the result without rasterizing their content, so their text remains selectable and searchable. Added images are embedded as separate image objects over the copied page. Pages created from image files remain image-based. Files are processed locally; very large source PDFs and images can still require substantial browser memory.
 
 ## 🚀 Installation
 

@@ -21,7 +21,7 @@ export const pdfTools: PdfTool[] = [
     id: 'split-pdf',
     name: 'Diviser un PDF',
     description: 'Extraire des pages sélectionnées depuis un document PDF.',
-    icon: 'mdi-file-split-outline',
+    icon: 'mdi-content-cut',
     route: '/tools/split-pdf',
     available: false,
   },

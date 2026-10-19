@@ -5,10 +5,12 @@
   import AppHeader from '@/components/layout/AppHeader.vue'
   import DocumentPageCanvas from '@/components/pdf/DocumentPageCanvas.vue'
   import PdfDropzone from '@/components/pdf/PdfDropzone.vue'
+  import PdfFileList from '@/components/pdf/PdfFileList.vue'
   import { createEditorPages, exportEditorPages, readImageForPage } from '@/services/pdf/documentEditor'
 
   const selectedFiles = ref<File[]>([])
   const pages = ref<EditorPage[]>([])
+  const isEditorOpen = ref(false)
   const selectedPageId = ref<string | null>(null)
   const selectedImageId = ref<string | null>(null)
   const isLoading = ref(false)
@@ -43,6 +45,22 @@
     return error instanceof Error ? error.message : 'Une erreur est survenue pendant le traitement du document.'
   }
 
+  function removeSelectedFile (index: number) {
+    selectedFiles.value = selectedFiles.value.filter((_, currentIndex) => currentIndex !== index)
+  }
+
+  function reorderSelectedFiles (payload: { from: number, to: number }) {
+    const nextFiles = [...selectedFiles.value]
+    const [file] = nextFiles.splice(payload.from, 1)
+
+    if (!file) {
+      return
+    }
+
+    nextFiles.splice(payload.to, 0, file)
+    selectedFiles.value = nextFiles
+  }
+
   async function loadInitialFiles () {
     try {
       isLoading.value = true
@@ -50,6 +68,7 @@
       pages.value = await createEditorPages(selectedFiles.value)
       selectedPageId.value = pages.value[0]?.id ?? null
       selectedImageId.value = pages.value[0]?.images[0]?.id ?? null
+      isEditorOpen.value = true
       clearDownload()
     } catch (error) {
       errorMessage.value = readableError(error)
@@ -71,6 +90,7 @@
       const newPages = await createEditorPages(files)
 
       pages.value = [...pages.value, ...newPages]
+      selectedFiles.value = [...selectedFiles.value, ...files]
       selectedPageId.value = newPages[0]?.id ?? selectedPageId.value
       selectedImageId.value = newPages[0]?.images[0]?.id ?? null
       clearDownload()
@@ -145,8 +165,14 @@
     clearDownload()
   }
 
-  function resizeSelectedImage (widthPercent: number | number[]) {
-    if (!selectedImage.value || !selectedPage.value || Array.isArray(widthPercent)) {
+  function resizeSelectedImage (value: string | number | number[]) {
+    if (!selectedImage.value || !selectedPage.value || Array.isArray(value)) {
+      return
+    }
+
+    const widthPercent = Number(value)
+
+    if (!Number.isFinite(widthPercent) || widthPercent <= 0) {
       return
     }
 
@@ -156,8 +182,6 @@
 
     image.width = width
     image.height = height
-    image.x = Math.min(image.x, selectedPage.value.width - width)
-    image.y = Math.min(image.y, selectedPage.value.height - height)
     clearDownload()
   }
 
@@ -180,6 +204,7 @@
 
     if (pages.value.length === 0) {
       selectedFiles.value = []
+      isEditorOpen.value = false
     }
 
     if (selectedPageId.value === pageId) {
@@ -189,6 +214,12 @@
       selectedImageId.value = replacement?.images[0]?.id ?? null
     }
 
+    clearDownload()
+  }
+
+  function returnToFiles () {
+    isEditorOpen.value = false
+    clearError()
     clearDownload()
   }
 
@@ -232,276 +263,295 @@
     <AppHeader />
 
     <v-main class="editor-main">
-      <v-container class="editor-shell py-6 py-md-8">
-        <header class="editor-heading">
-          <div>
-            <div class="text-overline text-primary font-weight-bold">Éditeur de document</div>
-            <h1 class="text-h4 font-weight-bold">Composer un PDF</h1>
-
-            <p class="text-body-2 text-medium-emphasis mb-0">
-              Réunissez vos PDF et images, ajustez les pages puis exportez le résultat.
-            </p>
-          </div>
-
-          <v-btn
-            v-if="pages.length > 0"
-            color="primary"
-            :loading="isExporting"
-            prepend-icon="mdi-file-export-outline"
-            size="large"
-            @click="exportDocument"
-          >
-            Exporter le PDF
-          </v-btn>
-        </header>
-
-        <v-alert
-          v-if="errorMessage"
-          class="mb-5"
-          closable
-          type="error"
-          variant="tonal"
-          @click:close="clearError"
-        >
-          {{ errorMessage }}
-        </v-alert>
-
-        <section v-if="pages.length === 0" class="start-panel">
-          <PdfDropzone
-            v-model="selectedFiles"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
-            helper-text="Formats acceptés : PDF, JPG, JPEG, PNG et WebP. L’ordre de sélection définit l’ordre initial des pages."
-            label="Ajouter des PDF et des images"
-          />
-
-          <div class="d-flex justify-end mt-4">
-            <v-btn
-              color="primary"
-              :disabled="selectedFiles.length === 0 || isLoading"
-              :loading="isLoading"
-              prepend-icon="mdi-arrow-right"
-              @click="loadInitialFiles"
-            >
-              Ouvrir dans l’éditeur
-            </v-btn>
-          </div>
-        </section>
-
-        <section v-else class="editor-workspace">
-          <aside aria-label="Pages du document" class="page-rail">
-            <div class="d-flex align-center justify-space-between mb-3">
-              <h2 class="text-subtitle-1 font-weight-bold mb-0">Pages</h2>
-              <v-chip size="small" variant="tonal">{{ pages.length }}</v-chip>
-            </div>
-
-            <div class="page-list">
-              <article
-                v-for="(page, index) in pages"
-                :key="page.id"
-                class="page-row"
-                :class="{ 'page-row--selected': page.id === selectedPageId }"
-              >
-                <button class="page-select" type="button" @click="selectPage(page)">
-                  <span class="page-number">{{ index + 1 }}</span>
-
-                  <span class="page-label">
-                    <span>{{ page.sourceType === 'pdf' ? 'Page PDF' : 'Image' }} {{ page.pdfPageNumber ?? '' }}</span>
-                    <small>{{ page.sourceName }}</small>
-                  </span>
-                </button>
-
-                <div class="page-actions">
+      <v-container class="py-8">
+        <v-row justify="center">
+          <v-col cols="12" lg="8" md="10">
+            <v-card border class="editor-card pa-4 pa-md-6 rounded-xl" elevation="0">
+              <div class="d-flex flex-column flex-md-row justify-space-between align-start align-md-center mb-5 ga-3">
+                <div class="d-flex align-center ga-3">
                   <v-btn
-                    aria-label="Monter la page"
-                    density="compact"
-                    :disabled="index === 0"
-                    icon="mdi-chevron-up"
-                    size="x-small"
+                    v-if="isEditorOpen"
+                    aria-label="Retour à la sélection des fichiers"
+                    icon="mdi-arrow-left"
+                    title="Retour à la sélection des fichiers"
                     variant="text"
-                    @click="movePage(index, -1)"
+                    @click="returnToFiles"
                   />
 
-                  <v-btn
-                    aria-label="Descendre la page"
-                    density="compact"
-                    :disabled="index === pages.length - 1"
-                    icon="mdi-chevron-down"
-                    size="x-small"
-                    variant="text"
-                    @click="movePage(index, 1)"
-                  />
+                  <div>
+                    <div class="text-overline text-primary font-weight-bold">Outil</div>
+                    <h1 class="text-h4 font-weight-bold mb-1">Composer un PDF</h1>
 
-                  <v-btn
-                    :aria-label="`Supprimer la page ${index + 1}`"
-                    density="compact"
-                    icon="mdi-close"
-                    size="x-small"
-                    variant="text"
-                    @click="deletePage(page.id)"
-                  />
+                    <p class="text-body-2 text-medium-emphasis mb-0">
+                      Réunissez vos PDF et images, ajustez les pages puis exportez le résultat.
+                    </p>
+                  </div>
                 </div>
-              </article>
-            </div>
-
-            <div class="page-rail-actions mt-4">
-              <v-btn block prepend-icon="mdi-file-plus-outline" variant="outlined" @click="additionalFilesInput?.click()">
-                Ajouter des fichiers
-              </v-btn>
-
-              <input
-                ref="additionalFilesInput"
-                accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
-                class="visually-hidden"
-                multiple
-                type="file"
-                @change="appendDocuments(($event.target as HTMLInputElement).files)"
-              >
-            </div>
-          </aside>
-
-          <main class="canvas-column">
-            <div class="canvas-toolbar">
-              <div class="d-flex align-center flex-wrap ga-2">
-                <span class="canvas-page-name">
-                  {{ selectedPage?.sourceName }}
-                  <span v-if="selectedPage?.pdfPageNumber">· page {{ selectedPage.pdfPageNumber }}</span>
-                </span>
-
-                <v-divider class="mx-1" vertical />
 
                 <v-btn
-                  aria-label="Tourner la page à gauche"
-                  icon="mdi-rotate-left"
-                  size="small"
-                  variant="text"
-                  @click="rotatePage(-90)"
-                />
+                  v-if="!isEditorOpen"
+                  color="primary"
+                  :disabled="selectedFiles.length === 0 || isLoading"
+                  :loading="isLoading"
+                  prepend-icon="mdi-arrow-right"
+                  size="large"
+                  @click="loadInitialFiles"
+                >
+                  Ouvrir dans l’éditeur
+                </v-btn>
 
                 <v-btn
-                  aria-label="Tourner la page à droite"
-                  icon="mdi-rotate-right"
-                  size="small"
-                  variant="text"
-                  @click="rotatePage(90)"
-                />
+                  v-else
+                  color="primary"
+                  :loading="isExporting"
+                  prepend-icon="mdi-file-export-outline"
+                  size="large"
+                  @click="exportDocument"
+                >
+                  Exporter le PDF
+                </v-btn>
               </div>
 
-              <v-btn
-                color="primary"
-                prepend-icon="mdi-image-plus-outline"
-                size="small"
+              <v-alert
+                v-if="errorMessage"
+                class="mb-5"
+                closable
+                type="error"
                 variant="tonal"
-                @click="imagesInput?.click()"
+                @click:close="clearError"
               >
-                Ajouter une image
-              </v-btn>
+                {{ errorMessage }}
+              </v-alert>
 
-              <input
-                ref="imagesInput"
-                accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                class="visually-hidden"
-                multiple
-                type="file"
-                @change="appendImages(($event.target as HTMLInputElement).files)"
-              >
-            </div>
-
-            <div class="canvas-area">
-              <div v-if="selectedPage" class="canvas-inner">
-                <DocumentPageCanvas
-                  :page="selectedPage"
-                  :selected-image-id="selectedImageId"
-                  @deselect-image="selectedImageId = null"
-                  @select-image="selectedImageId = $event"
-                  @update-image="updateImage"
+              <section v-if="!isEditorOpen" class="start-panel">
+                <PdfDropzone
+                  v-model="selectedFiles"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                  helper-text="Formats acceptés : PDF, JPG, JPEG, PNG et WebP. L’ordre de sélection définit l’ordre initial des pages."
+                  label="Ajouter des PDF et des images"
                 />
-              </div>
 
-              <v-progress-linear v-if="isLoading" class="canvas-progress" color="primary" indeterminate />
-            </div>
+                <div class="d-flex align-center justify-space-between mt-6 mb-3">
+                  <h2 class="text-h6 mb-0">Fichiers sélectionnés</h2>
 
-            <v-alert class="mt-4" density="compact" type="info" variant="tonal">
-              Les PDF exportés sont aplatis en images pour conserver fidèlement les rotations et la composition. Le texte ne sera plus sélectionnable.
-            </v-alert>
+                  <v-chip color="primary" size="small" variant="tonal">
+                    {{ selectedFiles.length }} {{ selectedFiles.length > 1 ? 'fichiers' : 'fichier' }}
+                  </v-chip>
+                </div>
 
-            <v-alert
-              v-if="downloadUrl"
-              class="mt-4"
-              density="comfortable"
-              type="success"
-              variant="tonal"
-            >
-              <div class="d-flex align-center justify-space-between flex-wrap ga-3">
-                <span>Votre document est prêt.</span>
+                <PdfFileList :files="selectedFiles" @remove="removeSelectedFile" @reorder="reorderSelectedFiles" />
+              </section>
 
-                <v-btn color="success" download="document-compose.pdf" :href="downloadUrl" variant="flat">
-                  Télécharger le PDF
-                </v-btn>
-              </div>
-            </v-alert>
-          </main>
+              <section v-else class="editor-workspace">
+                <aside aria-label="Pages du document" class="page-rail">
+                  <div class="d-flex align-center justify-space-between mb-3">
+                    <h2 class="text-subtitle-1 font-weight-bold mb-0">Pages</h2>
+                    <v-chip size="small" variant="tonal">{{ pages.length }}</v-chip>
+                  </div>
 
-          <aside aria-label="Propriétés de l’élément sélectionné" class="properties-panel">
-            <h2 class="text-subtitle-1 font-weight-bold mb-4">Mise en page</h2>
+                  <div class="page-list">
+                    <article
+                      v-for="(page, index) in pages"
+                      :key="page.id"
+                      class="page-row"
+                      :class="{ 'page-row--selected': page.id === selectedPageId }"
+                    >
+                      <button class="page-select" type="button" @click="selectPage(page)">
+                        <span class="page-number">{{ index + 1 }}</span>
 
-            <template v-if="selectedImage">
-              <div class="selected-image-name">
-                <v-icon color="primary" size="20">mdi-image-outline</v-icon>
-                <span>{{ selectedImage.name }}</span>
-              </div>
+                        <span class="page-label">
+                          <span>{{ page.sourceType === 'pdf' ? 'Page PDF' : 'Image' }} {{ page.pdfPageNumber ?? '' }}</span>
+                          <small>{{ page.sourceName }}</small>
+                        </span>
+                      </button>
 
-              <div class="property-label mt-5">Taille de l’image</div>
+                      <div class="page-actions">
+                        <v-btn
+                          aria-label="Monter la page"
+                          density="compact"
+                          :disabled="index === 0"
+                          icon="mdi-chevron-up"
+                          size="x-small"
+                          variant="text"
+                          @click="movePage(index, -1)"
+                        />
 
-              <v-slider
-                color="primary"
-                hide-details
-                :max="95"
-                :min="10"
-                :model-value="selectedImageWidthPercent"
-                step="1"
-                thumb-label
-                @update:model-value="resizeSelectedImage"
-              />
+                        <v-btn
+                          aria-label="Descendre la page"
+                          density="compact"
+                          :disabled="index === pages.length - 1"
+                          icon="mdi-chevron-down"
+                          size="x-small"
+                          variant="text"
+                          @click="movePage(index, 1)"
+                        />
 
-              <div class="d-flex justify-space-between text-caption text-medium-emphasis">
-                <span>10 %</span>
-                <span>{{ selectedImageWidthPercent }} % de la page</span>
-                <span>95 %</span>
-              </div>
+                        <v-btn
+                          :aria-label="`Supprimer la page ${index + 1}`"
+                          density="compact"
+                          icon="mdi-close"
+                          size="x-small"
+                          variant="text"
+                          @click="deletePage(page.id)"
+                        />
+                      </div>
+                    </article>
+                  </div>
 
-              <div class="property-label mt-6">Rotation de l’image</div>
+                  <div class="page-rail-actions mt-4">
+                    <v-btn block prepend-icon="mdi-file-plus-outline" variant="outlined" @click="additionalFilesInput?.click()">
+                      Ajouter des fichiers
+                    </v-btn>
 
-              <div class="d-flex ga-2">
-                <v-btn block prepend-icon="mdi-rotate-left" variant="outlined" @click="rotateSelectedImage(-90)">
-                  −90°
-                </v-btn>
+                    <input
+                      ref="additionalFilesInput"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                      class="visually-hidden"
+                      multiple
+                      type="file"
+                      @change="appendDocuments(($event.target as HTMLInputElement).files)"
+                    >
+                  </div>
+                </aside>
 
-                <v-btn append-icon="mdi-rotate-right" block variant="outlined" @click="rotateSelectedImage(90)">
-                  +90°
-                </v-btn>
-              </div>
+                <main class="canvas-column">
+                  <div class="canvas-toolbar">
+                    <div class="d-flex align-center flex-wrap ga-2">
+                      <span class="canvas-page-name">
+                        {{ selectedPage?.sourceName }}
+                        <span v-if="selectedPage?.pdfPageNumber">· page {{ selectedPage.pdfPageNumber }}</span>
+                      </span>
 
-              <v-btn
-                block
-                class="mt-6"
-                color="error"
-                prepend-icon="mdi-delete-outline"
-                variant="text"
-                @click="deleteSelectedImage"
-              >
-                Supprimer l’image
-              </v-btn>
-            </template>
+                      <v-divider class="mx-1" vertical />
 
-            <div v-else class="properties-empty">
-              <v-icon color="medium-emphasis" size="28">mdi-cursor-default-click-outline</v-icon>
+                      <v-btn
+                        aria-label="Tourner la page à gauche"
+                        icon="mdi-rotate-left"
+                        size="small"
+                        variant="text"
+                        @click="rotatePage(-90)"
+                      />
 
-              <p class="text-body-2 text-medium-emphasis mt-2 mb-0">
-                Sélectionnez une image pour modifier sa taille ou sa rotation.
-              </p>
-            </div>
-          </aside>
-        </section>
+                      <v-btn
+                        aria-label="Tourner la page à droite"
+                        icon="mdi-rotate-right"
+                        size="small"
+                        variant="text"
+                        @click="rotatePage(90)"
+                      />
+                    </div>
+
+                    <v-btn
+                      color="primary"
+                      prepend-icon="mdi-image-plus-outline"
+                      size="small"
+                      variant="tonal"
+                      @click="imagesInput?.click()"
+                    >
+                      Ajouter une image
+                    </v-btn>
+
+                    <input
+                      ref="imagesInput"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                      class="visually-hidden"
+                      multiple
+                      type="file"
+                      @change="appendImages(($event.target as HTMLInputElement).files)"
+                    >
+                  </div>
+
+                  <div class="canvas-area">
+                    <div v-if="selectedPage" class="canvas-inner">
+                      <DocumentPageCanvas
+                        :page="selectedPage"
+                        :selected-image-id="selectedImageId"
+                        @deselect-image="selectedImageId = null"
+                        @select-image="selectedImageId = $event"
+                        @update-image="updateImage"
+                      />
+                    </div>
+
+                    <v-progress-linear v-if="isLoading" class="canvas-progress" color="primary" indeterminate />
+                  </div>
+
+                  <v-alert class="mt-4" density="compact" type="info" variant="tonal">
+                    Les pages PDF conservent leur texte. Les images ajoutées restent des éléments image dans le document exporté.
+                  </v-alert>
+
+                  <v-alert
+                    v-if="downloadUrl"
+                    class="mt-4"
+                    density="comfortable"
+                    type="success"
+                    variant="tonal"
+                  >
+                    <div class="d-flex align-center justify-space-between flex-wrap ga-3">
+                      <span>Votre document est prêt.</span>
+
+                      <v-btn color="success" download="document-compose.pdf" :href="downloadUrl" variant="flat">
+                        Télécharger le PDF
+                      </v-btn>
+                    </div>
+                  </v-alert>
+                </main>
+
+                <aside aria-label="Propriétés de l’élément sélectionné" class="properties-panel">
+                  <h2 class="text-subtitle-1 font-weight-bold mb-4">Mise en page</h2>
+
+                  <template v-if="selectedImage">
+                    <div class="selected-image-name">
+                      <v-icon color="primary" size="20">mdi-image-outline</v-icon>
+                      <span>{{ selectedImage.name }}</span>
+                    </div>
+
+                    <div class="property-label mt-5">Largeur de l’image</div>
+
+                    <v-text-field
+                      hide-details
+                      min="1"
+                      :model-value="selectedImageWidthPercent"
+                      suffix="% de la page"
+                      type="number"
+                      @update:model-value="resizeSelectedImage"
+                    />
+
+                    <div class="property-label mt-6">Rotation de l’image</div>
+
+                    <div class="image-rotation-actions">
+                      <v-btn block prepend-icon="mdi-rotate-left" variant="outlined" @click="rotateSelectedImage(-90)">
+                        −90°
+                      </v-btn>
+
+                      <v-btn append-icon="mdi-rotate-right" block variant="outlined" @click="rotateSelectedImage(90)">
+                        +90°
+                      </v-btn>
+                    </div>
+
+                    <v-btn
+                      block
+                      class="mt-6"
+                      color="error"
+                      prepend-icon="mdi-delete-outline"
+                      variant="text"
+                      @click="deleteSelectedImage"
+                    >
+                      Supprimer l’image
+                    </v-btn>
+                  </template>
+
+                  <div v-else class="properties-empty">
+                    <v-icon color="medium-emphasis" size="28">mdi-cursor-default-click-outline</v-icon>
+
+                    <p class="text-body-2 text-medium-emphasis mt-2 mb-0">
+                      Sélectionnez une image pour modifier sa taille ou sa rotation.
+                    </p>
+                  </div>
+                </aside>
+              </section>
+            </v-card>
+          </v-col>
+        </v-row>
       </v-container>
     </v-main>
   </div>
@@ -513,35 +563,30 @@
     background: #f3f5f8;
   }
 
-  .editor-shell {
-    max-width: 1600px;
-  }
-
-  .editor-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 24px;
-  }
-
   .editor-workspace {
     display: grid;
-    grid-template-columns: 250px minmax(0, 1fr) 260px;
-    gap: 18px;
+    grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+    gap: clamp(10px, 2vw, 18px);
     align-items: start;
   }
 
   .page-rail,
   .properties-panel {
-    position: sticky;
-    top: 84px;
-    max-height: calc(100vh - 104px);
     padding: 16px;
     overflow: auto;
     border: 1px solid #e1e5eb;
     border-radius: 10px;
     background: #fff;
+  }
+
+  .properties-panel {
+    grid-column: 2;
+  }
+
+  .image-rotation-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .page-list {
@@ -643,9 +688,9 @@
 
   .canvas-area {
     position: relative;
-    min-height: 430px;
-    padding: 28px;
-    overflow: auto;
+    min-height: 0;
+    padding: clamp(8px, 2vw, 28px);
+    overflow: visible;
     border: 1px solid #e1e5eb;
     border-top: 0;
     background-color: #e9edf2;
@@ -654,7 +699,7 @@
   }
 
   .canvas-inner {
-    min-width: 240px;
+    min-width: 0;
   }
 
   .canvas-progress {
@@ -693,7 +738,7 @@
 
   .start-panel {
     max-width: 900px;
-    margin: 48px auto;
+    margin: 0 auto;
   }
 
   .visually-hidden {
@@ -706,24 +751,7 @@
     clip-path: inset(50%);
   }
 
-  @media (max-width: 1100px) {
-    .editor-workspace {
-      grid-template-columns: 220px minmax(0, 1fr);
-    }
-
-    .properties-panel {
-      position: static;
-      grid-column: 2;
-      max-height: none;
-    }
-  }
-
   @media (max-width: 700px) {
-    .editor-heading {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
     .editor-workspace {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -732,7 +760,7 @@
     .properties-panel {
       position: static;
       grid-column: 1;
-      max-height: 260px;
+      max-height: none;
     }
 
     .page-rail {
@@ -748,8 +776,7 @@
     }
 
     .canvas-area {
-      min-height: 300px;
-      padding: 14px;
+      padding: 8px;
     }
 
     .canvas-toolbar {
